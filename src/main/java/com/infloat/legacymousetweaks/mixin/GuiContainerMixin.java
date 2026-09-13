@@ -1,16 +1,9 @@
 package com.infloat.legacymousetweaks.mixin;
 
-import com.infloat.legacymousetweaks.config.ConfigManager;
-import com.infloat.legacymousetweaks.config.MouseTweaksConfig;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.slot.CraftingResultSlot;
-import net.minecraft.inventory.slot.Slot;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.ScreenHandler;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
 import org.lwjgl.input.Mouse;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -20,14 +13,23 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
+import com.infloat.legacymousetweaks.config.ConfigManager;
+import com.infloat.legacymousetweaks.config.MouseTweaksConfig;
 
-@Mixin(HandledScreen.class)
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.game.inventory.CreativeInventoryScreen;
+import net.minecraft.client.gui.screen.game.inventory.InventoryMenuScreen;
+import net.minecraft.entity.living.player.PlayerInventory;
+import net.minecraft.inventory.menu.InventoryMenu;
+import net.minecraft.inventory.slot.CraftingResultSlot;
+import net.minecraft.inventory.slot.InventorySlot;
+import net.minecraft.item.ItemStack;
+
+@Mixin(InventoryMenuScreen.class)
 public abstract class GuiContainerMixin {
     @Unique
-    private Slot lmt_oldSelectedSlot;
+    private InventorySlot lmt_oldSelectedInventorySlot;
 
     @Unique
     private boolean lmt_canDoLMBDrag;
@@ -36,20 +38,23 @@ public abstract class GuiContainerMixin {
     private boolean lmt_canDoRMBDrag;
 
     @Shadow
-    protected boolean isCursorDragging;
+    protected boolean isDraggingItem;
 
     @Shadow
-    protected Set<Slot> cursorDragSlots;
+    protected Set<InventorySlot> draggedInvSlots;
 
-    @Invoker("getSlotAt")
-    protected abstract Slot lmt_getSlotAt(int mouseX, int mouseY);
+    @Invoker("getSlot")
+    protected abstract InventorySlot lmt_getSlot(int mouseX, int mouseY);
 
-    @Invoker("onMouseClick")
-    protected abstract void lmt_onMouseClick(Slot slot, int slotId, int button, int mode);
+    @Invoker("clickSlot")
+    protected abstract void lmt_clickSlot(InventorySlot slot, int slotId, int button, int mode);
+
+    @Shadow
+    protected InventoryMenu menu;
 
     @Unique
     private static boolean lmt_isStackEmpty(ItemStack stack) {
-        return stack == null || stack.getItem() == null || stack.count <= 0;
+        return stack == null || stack.getItem() == null || stack.size <= 0;
     }
 
     @Unique
@@ -62,19 +67,20 @@ public abstract class GuiContainerMixin {
         if (lmt_isStackEmpty(a) || lmt_isStackEmpty(b)) {
             return true;
         }
-        if (!ItemStack.equalsIgnoreNbt(a, b)) {
+        if (!ItemStack.matchesItem(a, b)) {
             return false;
         }
-        return !a.hasSubTypes() || a.getData() == b.getData();
+
+        return !a.hasCustomData() || a.getMetadata() == b.getMetadata();
     }
 
     @Unique
-    private static boolean lmt_isCraftingOutput(Slot slot) {
+    private static boolean lmt_isCraftingOutput(InventorySlot slot) {
         return slot instanceof CraftingResultSlot;
     }
 
     @Unique
-    private void lmt_rmbTweakMaybeClickSlot(Slot slot, ItemStack stackOnMouse) {
+    private void lmt_rmbTweakMaybeClickInventorySlot(InventorySlot slot, ItemStack stackOnMouse) {
         if (slot == null) {
             return;
         }
@@ -85,34 +91,34 @@ public abstract class GuiContainerMixin {
             return;
         }
 
-        ItemStack selectedSlotStack = slot.getStack();
-        if (!lmt_areStacksCompatible(selectedSlotStack, stackOnMouse)) {
+        ItemStack selectedInventorySlotStack = slot.getItem();
+        if (!lmt_areStacksCompatible(selectedInventorySlotStack, stackOnMouse)) {
             return;
         }
 
-        if (!lmt_isStackEmpty(selectedSlotStack)
-                && selectedSlotStack.count >= slot.getMaxStackAmount(selectedSlotStack)) {
+        if (!lmt_isStackEmpty(selectedInventorySlotStack)
+                && selectedInventorySlotStack.size >= slot.getMaxStackSize(selectedInventorySlotStack)) {
             return;
         }
 
-        this.lmt_onMouseClick(slot, slot.id, 1, 0);
+        this.lmt_clickSlot(slot, slot.index, 1, 0);
     }
 
     @Inject(method = "mouseClicked(III)V", at = @At("HEAD"), cancellable = true)
     private void lmt_onMouseClicked(int mouseX, int mouseY, int mouseButton, CallbackInfo ci) {
-        Slot selectedSlot = this.lmt_getSlotAt(mouseX, mouseY);
-        this.lmt_oldSelectedSlot = selectedSlot;
+        InventorySlot selectedSlot = this.lmt_getSlot(mouseX, mouseY);
+        this.lmt_oldSelectedInventorySlot = selectedSlot;
 
-        ItemStack stackOnMouse = MinecraftClient.getInstance().player.inventory.getCursorStack();
+        ItemStack stackOnMouse = Minecraft.getInstance().player.inventory.getCursorItem();
         if (mouseButton == 0) {
             this.lmt_canDoLMBDrag = lmt_isStackEmpty(stackOnMouse);
         } else if (mouseButton == 1) {
             this.lmt_canDoRMBDrag = !lmt_isStackEmpty(stackOnMouse) && lmt_config().rmbTweak;
             if (this.lmt_canDoRMBDrag) {
                 // Replace vanilla RMB click/drag behavior with MouseTweaks-style behavior.
-                this.isCursorDragging = false;
-                this.cursorDragSlots.clear();
-                this.lmt_rmbTweakMaybeClickSlot(selectedSlot, stackOnMouse);
+                this.isDraggingItem = false;
+                this.draggedInvSlots.clear();
+                this.lmt_rmbTweakMaybeClickInventorySlot(selectedSlot, stackOnMouse);
                 ci.cancel();
             }
         }
@@ -120,27 +126,28 @@ public abstract class GuiContainerMixin {
 
     @Inject(method = "mouseDragged(IIIJ)V", at = @At("HEAD"), cancellable = true)
     private void lmt_onMouseDragged(int mouseX, int mouseY, int mouseButton, long timeSinceClick, CallbackInfo ci) {
-        Slot selectedSlot = this.lmt_getSlotAt(mouseX, mouseY);
+        Minecraft mc = Minecraft.getInstance();
 
+        InventorySlot selectedInventorySlot = this.lmt_getSlot(mouseX, mouseY);
         if (mouseButton == 1 && this.lmt_canDoRMBDrag) {
-            if (selectedSlot != this.lmt_oldSelectedSlot) {
-                this.lmt_rmbTweakMaybeClickSlot(selectedSlot, MinecraftClient.getInstance().player.inventory.getCursorStack());
-                this.lmt_oldSelectedSlot = selectedSlot;
+            if (selectedInventorySlot != this.lmt_oldSelectedInventorySlot) {
+                this.lmt_rmbTweakMaybeClickInventorySlot(selectedInventorySlot, mc.player.inventory.getCursorItem());
+                this.lmt_oldSelectedInventorySlot = selectedInventorySlot;
             }
 
             ci.cancel();
             return;
         }
 
-        if (selectedSlot == this.lmt_oldSelectedSlot) {
+        if (selectedInventorySlot == this.lmt_oldSelectedInventorySlot) {
             return;
         }
 
-        ItemStack stackOnMouse = MinecraftClient.getInstance().player.inventory.getCursorStack();
+        ItemStack stackOnMouse = mc.player.inventory.getCursorItem();
 
-        this.lmt_oldSelectedSlot = selectedSlot;
+        this.lmt_oldSelectedInventorySlot = selectedInventorySlot;
 
-        if (selectedSlot == null) {
+        if (selectedInventorySlot == null) {
             return;
         }
 
@@ -149,34 +156,34 @@ public abstract class GuiContainerMixin {
                 return;
             }
 
-            ItemStack selectedSlotStack = selectedSlot.getStack();
-                if (lmt_isStackEmpty(selectedSlotStack)) {
+            ItemStack selectedInventorySlotStack = selectedInventorySlot.getItem();
+                if (lmt_isStackEmpty(selectedInventorySlotStack)) {
                     return;
                 }
 
-                boolean shiftIsDown = Screen.hasShiftDown();
+                boolean shiftIsDown = Screen.isShiftDown();
                 if (lmt_isStackEmpty(stackOnMouse)) {
                     if (!lmt_config().lmbTweakWithoutItem || !shiftIsDown) {
                         return;
                     }
-                    this.lmt_onMouseClick(selectedSlot, selectedSlot.id, 0, 1);
+                    this.lmt_clickSlot(selectedInventorySlot, selectedInventorySlot.index, 0, 1);
                 } else {
                     if (!lmt_config().lmbTweakWithItem) {
                         return;
                     }
-                if (!lmt_areStacksCompatible(selectedSlotStack, stackOnMouse)) {
+                if (!lmt_areStacksCompatible(selectedInventorySlotStack, stackOnMouse)) {
                     return;
                 }
 
                 if (shiftIsDown) {
-                    this.lmt_onMouseClick(selectedSlot, selectedSlot.id, 0, 1);
+                    this.lmt_clickSlot(selectedInventorySlot, selectedInventorySlot.index, 0, 1);
                 } else {
-                    if (stackOnMouse.count + selectedSlotStack.count > stackOnMouse.getMaxCount()) {
+                    if (stackOnMouse.size + selectedInventorySlotStack.size > stackOnMouse.getMaxSize()) {
                         return;
                     }
-                    this.lmt_onMouseClick(selectedSlot, selectedSlot.id, 0, 0);
-                    if (!lmt_isCraftingOutput(selectedSlot)) {
-                        this.lmt_onMouseClick(selectedSlot, selectedSlot.id, 0, 0);
+                    this.lmt_clickSlot(selectedInventorySlot, selectedInventorySlot.index, 0, 0);
+                    if (!lmt_isCraftingOutput(selectedInventorySlot)) {
+                        this.lmt_clickSlot(selectedInventorySlot, selectedInventorySlot.index, 0, 0);
                     }
                 }
             }
@@ -190,8 +197,8 @@ public abstract class GuiContainerMixin {
         } else if (state == 1) {
             if (this.lmt_canDoRMBDrag) {
                 // Prevent vanilla from adding an extra RMB action on release.
-                this.isCursorDragging = false;
-                this.cursorDragSlots.clear();
+                this.isDraggingItem = false;
+                this.draggedInvSlots.clear();
                 ci.cancel();
             }
             this.lmt_canDoRMBDrag = false;
@@ -209,7 +216,7 @@ public abstract class GuiContainerMixin {
             if ((Object) this instanceof CreativeInventoryScreen) {
                 return;
             }
-            MinecraftClient mc = MinecraftClient.getInstance();
+            Minecraft mc = Minecraft.getInstance();
             if (mc == null || mc.player == null || mc.width <= 0 || mc.height <= 0) {
                 return;
             }
@@ -218,8 +225,7 @@ public abstract class GuiContainerMixin {
             if (wheel == 0) {
                 return;
             }
-            ScreenHandler screenHandler = ((HandledScreen) (Object) this).screenHandler;
-            if (screenHandler == null || screenHandler.slots == null) {
+            if (menu == null || menu.slots == null) {
                 return;
             }
 
@@ -228,13 +234,13 @@ public abstract class GuiContainerMixin {
             int mouseX = Mouse.getX() * screenWidth / mc.width;
             int mouseY = screenHeight - Mouse.getY() * screenHeight / mc.height - 1;
 
-            Slot selectedSlot = this.lmt_getSlotAt(mouseX, mouseY);
-            if (selectedSlot == null) {
+            InventorySlot selectedInventorySlot = this.lmt_getSlot(mouseX, mouseY);
+            if (selectedInventorySlot == null) {
                 return;
             }
 
-            ItemStack selectedSlotStack = selectedSlot.getStack();
-            if (lmt_isStackEmpty(selectedSlotStack)) {
+            ItemStack selectedInventorySlotStack = selectedInventorySlot.getItem();
+            if (lmt_isStackEmpty(selectedInventorySlotStack)) {
                 return;
             }
 
@@ -243,11 +249,11 @@ public abstract class GuiContainerMixin {
                 delta = wheel > 0 ? 1 : -1;
             }
 
-            List<Slot> slots = screenHandler.slots;
+            List<InventorySlot> slots = menu.slots;
             int numItemsToMove = Math.abs(delta);
             boolean pushItems = delta < 0;
 
-            if (lmt_config().wheelScrollDirection == 2 && this.lmt_otherInventoryIsAbove(selectedSlot, slots)) {
+            if (lmt_config().wheelScrollDirection == 2 && this.lmt_otherInventoryIsAbove(selectedInventorySlot, slots)) {
                 pushItems = !pushItems;
             }
             if (lmt_config().wheelScrollDirection == 1) {
@@ -255,9 +261,9 @@ public abstract class GuiContainerMixin {
             }
 
             if (pushItems) {
-                this.lmt_wheelPush(selectedSlot, slots, numItemsToMove);
+                this.lmt_wheelPush(selectedInventorySlot, slots, numItemsToMove);
             } else {
-                this.lmt_wheelPull(selectedSlot, slots, numItemsToMove);
+                this.lmt_wheelPull(selectedInventorySlot, slots, numItemsToMove);
             }
         } catch (Throwable t) {
             System.err.println("[LegacyMouseTweaks] Wheel tweak error: " + t);
@@ -265,34 +271,34 @@ public abstract class GuiContainerMixin {
     }
 
     @Unique
-    private void lmt_wheelPush(Slot selectedSlot, List<Slot> slots, int numItemsToMove) {
-        ItemStack selectedSlotStack = selectedSlot.getStack();
-        if (lmt_isStackEmpty(selectedSlotStack)) {
+    private void lmt_wheelPush(InventorySlot selectedInventorySlot, List<InventorySlot> slots, int numItemsToMove) {
+        ItemStack selectedInventorySlotStack = selectedInventorySlot.getItem();
+        if (lmt_isStackEmpty(selectedInventorySlotStack)) {
             return;
         }
 
-        ItemStack stackOnMouse = MinecraftClient.getInstance().player.inventory.getCursorStack();
-        if (!lmt_isStackEmpty(stackOnMouse) && !selectedSlot.canInsert(stackOnMouse)) {
+        ItemStack stackOnMouse = Minecraft.getInstance().player.inventory.getCursorItem();
+        if (!lmt_isStackEmpty(stackOnMouse) && !selectedInventorySlot.isItemAllowed(stackOnMouse)) {
             return;
         }
 
-        numItemsToMove = Math.min(numItemsToMove, selectedSlotStack.count);
-        List<Slot> targetSlots = this.lmt_findPushSlots(selectedSlot, slots, numItemsToMove, false);
-        if (targetSlots.isEmpty()) {
+        numItemsToMove = Math.min(numItemsToMove, selectedInventorySlotStack.size);
+        List<InventorySlot> targetInventorySlots = this.lmt_findPushInventorySlots(selectedInventorySlot, slots, numItemsToMove, false);
+        if (targetInventorySlots.isEmpty()) {
             return;
         }
 
-        this.lmt_onMouseClick(selectedSlot, selectedSlot.id, 0, 0);
+        this.lmt_clickSlot(selectedInventorySlot, selectedInventorySlot.index, 0, 0);
 
-        for (Slot slot : targetSlots) {
-            ItemStack slotStack = slot.getStack();
-            int current = lmt_isStackEmpty(slotStack) ? 0 : slotStack.count;
-            int max = lmt_isStackEmpty(slotStack) ? slot.getMaxStackAmount() : slot.getMaxStackAmount(slotStack);
+        for (InventorySlot slot : targetInventorySlots) {
+            ItemStack slotStack = slot.getItem();
+            int current = lmt_isStackEmpty(slotStack) ? 0 : slotStack.size;
+            int max = lmt_isStackEmpty(slotStack) ? slot.getMaxStackSize() : slot.getMaxStackSize(slotStack);
             int clickTimes = Math.min(numItemsToMove, Math.max(0, max - current));
             numItemsToMove -= clickTimes;
 
             while (clickTimes-- > 0) {
-                this.lmt_onMouseClick(slot, slot.id, 1, 0);
+                this.lmt_clickSlot(slot, slot.index, 1, 0);
             }
 
             if (numItemsToMove <= 0) {
@@ -300,58 +306,58 @@ public abstract class GuiContainerMixin {
             }
         }
 
-        this.lmt_onMouseClick(selectedSlot, selectedSlot.id, 0, 0);
+        this.lmt_clickSlot(selectedInventorySlot, selectedInventorySlot.index, 0, 0);
     }
 
     @Unique
-    private void lmt_wheelPull(Slot selectedSlot, List<Slot> slots, int numItemsToMove) {
-        ItemStack selectedSlotStack = selectedSlot.getStack();
-        if (lmt_isStackEmpty(selectedSlotStack)) {
+    private void lmt_wheelPull(InventorySlot selectedInventorySlot, List<InventorySlot> slots, int numItemsToMove) {
+        ItemStack selectedInventorySlotStack = selectedInventorySlot.getItem();
+        if (lmt_isStackEmpty(selectedInventorySlotStack)) {
             return;
         }
 
-        int maxItemsToMove = selectedSlot.getMaxStackAmount(selectedSlotStack) - selectedSlotStack.count;
+        int maxItemsToMove = selectedInventorySlot.getMaxStackSize(selectedInventorySlotStack) - selectedInventorySlotStack.size;
         numItemsToMove = Math.min(numItemsToMove, maxItemsToMove);
 
         while (numItemsToMove > 0) {
-            Slot targetSlot = this.lmt_findPullSlot(selectedSlot, slots);
-            if (targetSlot == null) {
+            InventorySlot targetInventorySlot = this.lmt_findPullInventorySlot(selectedInventorySlot, slots);
+            if (targetInventorySlot == null) {
                 return;
             }
 
-            ItemStack targetStack = targetSlot.getStack();
+            ItemStack targetStack = targetInventorySlot.getItem();
             if (lmt_isStackEmpty(targetStack)) {
                 return;
             }
 
-            ItemStack stackOnMouse = MinecraftClient.getInstance().player.inventory.getCursorStack();
-            if (!lmt_isStackEmpty(stackOnMouse) && !targetSlot.canInsert(stackOnMouse)) {
+            ItemStack stackOnMouse = Minecraft.getInstance().player.inventory.getCursorItem();
+            if (!lmt_isStackEmpty(stackOnMouse) && !targetInventorySlot.isItemAllowed(stackOnMouse)) {
                 return;
             }
 
-            int numItemsInTargetSlot = targetStack.count;
-            int numItemsToMoveFromTargetSlot = Math.min(numItemsToMove, numItemsInTargetSlot);
-            numItemsToMove -= numItemsToMoveFromTargetSlot;
+            int numItemsInTargetInventorySlot = targetStack.size;
+            int numItemsToMoveFromTargetInventorySlot = Math.min(numItemsToMove, numItemsInTargetInventorySlot);
+            numItemsToMove -= numItemsToMoveFromTargetInventorySlot;
 
-            this.lmt_onMouseClick(targetSlot, targetSlot.id, 0, 0);
+            this.lmt_clickSlot(targetInventorySlot, targetInventorySlot.index, 0, 0);
 
-            if (numItemsToMoveFromTargetSlot == numItemsInTargetSlot) {
-                this.lmt_onMouseClick(selectedSlot, selectedSlot.id, 0, 0);
+            if (numItemsToMoveFromTargetInventorySlot == numItemsInTargetInventorySlot) {
+                this.lmt_clickSlot(selectedInventorySlot, selectedInventorySlot.index, 0, 0);
             } else {
-                for (int i = 0; i < numItemsToMoveFromTargetSlot; i++) {
-                    this.lmt_onMouseClick(selectedSlot, selectedSlot.id, 1, 0);
+                for (int i = 0; i < numItemsToMoveFromTargetInventorySlot; i++) {
+                    this.lmt_clickSlot(selectedInventorySlot, selectedInventorySlot.index, 1, 0);
                 }
             }
 
-            this.lmt_onMouseClick(targetSlot, targetSlot.id, 0, 0);
+            this.lmt_clickSlot(targetInventorySlot, targetInventorySlot.index, 0, 0);
         }
     }
 
     @Unique
-    private Slot lmt_findPullSlot(Slot selectedSlot, List<Slot> slots) {
-        ItemStack selectedSlotStack = selectedSlot.getStack();
-        PlayerInventory playerInventory = MinecraftClient.getInstance().player.inventory;
-        boolean findInPlayerInventory = selectedSlot.inventory != playerInventory;
+    private InventorySlot lmt_findPullInventorySlot(InventorySlot selectedInventorySlot, List<InventorySlot> slots) {
+        ItemStack selectedInventorySlotStack = selectedInventorySlot.getItem();
+        PlayerInventory playerInventory = Minecraft.getInstance().player.inventory;
+        boolean findInPlayerInventory = selectedInventorySlot.inventory != playerInventory;
 
         boolean reverse = lmt_config().wheelSearchOrder == 1;
         int startIndex = reverse ? slots.size() - 1 : 0;
@@ -359,8 +365,8 @@ public abstract class GuiContainerMixin {
         int direction = reverse ? -1 : 1;
 
         for (int i = startIndex; i != endIndex; i += direction) {
-            Slot slot = slots.get(i);
-            if (slot == selectedSlot) {
+            InventorySlot slot = slots.get(i);
+            if (slot == selectedInventorySlot) {
                 continue;
             }
 
@@ -369,11 +375,11 @@ public abstract class GuiContainerMixin {
                 continue;
             }
 
-            ItemStack stack = slot.getStack();
+            ItemStack stack = slot.getItem();
             if (lmt_isStackEmpty(stack)) {
                 continue;
             }
-            if (!lmt_areStacksCompatible(selectedSlotStack, stack)) {
+            if (!lmt_areStacksCompatible(selectedInventorySlotStack, stack)) {
                 continue;
             }
 
@@ -384,13 +390,13 @@ public abstract class GuiContainerMixin {
     }
 
     @Unique
-    private List<Slot> lmt_findPushSlots(Slot selectedSlot, List<Slot> slots, int itemCount, boolean mustDistributeAll) {
-        ItemStack selectedSlotStack = selectedSlot.getStack();
-        PlayerInventory playerInventory = MinecraftClient.getInstance().player.inventory;
-        boolean findInPlayerInventory = selectedSlot.inventory != playerInventory;
+    private List<InventorySlot> lmt_findPushInventorySlots(InventorySlot selectedInventorySlot, List<InventorySlot> slots, int itemCount, boolean mustDistributeAll) {
+        ItemStack selectedInventorySlotStack = selectedInventorySlot.getItem();
+        PlayerInventory playerInventory = Minecraft.getInstance().player.inventory;
+        boolean findInPlayerInventory = selectedInventorySlot.inventory != playerInventory;
 
-        List<Slot> result = new ArrayList<Slot>();
-        List<Slot> emptySlots = new ArrayList<Slot>();
+        List<InventorySlot> result = new ArrayList<InventorySlot>();
+        List<InventorySlot> emptyInventorySlots = new ArrayList<InventorySlot>();
 
         boolean reverse = lmt_config().wheelSearchOrder == 1;
         int startIndex = reverse ? slots.size() - 1 : 0;
@@ -398,8 +404,8 @@ public abstract class GuiContainerMixin {
         int direction = reverse ? -1 : 1;
 
         for (int i = startIndex; i != endIndex && itemCount > 0; i += direction) {
-            Slot slot = slots.get(i);
-            if (slot == selectedSlot) {
+            InventorySlot slot = slots.get(i);
+            if (slot == selectedInventorySlot) {
                 continue;
             }
 
@@ -411,45 +417,45 @@ public abstract class GuiContainerMixin {
                 continue;
             }
 
-            ItemStack stack = slot.getStack();
+            ItemStack stack = slot.getItem();
             if (lmt_isStackEmpty(stack)) {
-                if (slot.canInsert(selectedSlotStack)) {
-                    emptySlots.add(slot);
+                if (slot.isItemAllowed(selectedInventorySlotStack)) {
+                    emptyInventorySlots.add(slot);
                 }
-            } else if (lmt_areStacksCompatible(selectedSlotStack, stack) && stack.count < slot.getMaxStackAmount(stack)) {
+            } else if (lmt_areStacksCompatible(selectedInventorySlotStack, stack) && stack.size < slot.getMaxStackSize(stack)) {
                 result.add(slot);
-                itemCount -= Math.min(itemCount, slot.getMaxStackAmount(stack) - stack.count);
+                itemCount -= Math.min(itemCount, slot.getMaxStackSize(stack) - stack.size);
             }
         }
 
-        for (int i = 0; i < emptySlots.size() && itemCount > 0; i++) {
-            Slot slot = emptySlots.get(i);
+        for (int i = 0; i < emptyInventorySlots.size() && itemCount > 0; i++) {
+            InventorySlot slot = emptyInventorySlots.get(i);
             result.add(slot);
-            itemCount -= Math.min(itemCount, slot.getMaxStackAmount());
+            itemCount -= Math.min(itemCount, slot.getMaxStackSize());
         }
 
         if (mustDistributeAll && itemCount > 0) {
-            return new ArrayList<Slot>();
+            return new ArrayList<InventorySlot>();
         }
 
         return result;
     }
 
     @Unique
-    private boolean lmt_otherInventoryIsAbove(Slot selectedSlot, List<Slot> slots) {
-        PlayerInventory playerInventory = MinecraftClient.getInstance().player.inventory;
-        boolean selectedInPlayerInventory = selectedSlot.inventory == playerInventory;
+    private boolean lmt_otherInventoryIsAbove(InventorySlot selectedInventorySlot, List<InventorySlot> slots) {
+        PlayerInventory playerInventory = Minecraft.getInstance().player.inventory;
+        boolean selectedInPlayerInventory = selectedInventorySlot.inventory == playerInventory;
 
         int otherAbove = 0;
         int otherBelow = 0;
 
-        for (Slot slot : slots) {
+        for (InventorySlot slot : slots) {
             boolean slotInPlayerInventory = slot.inventory == playerInventory;
             if (slotInPlayerInventory == selectedInPlayerInventory) {
                 continue;
             }
 
-            if (slot.y < selectedSlot.y) {
+            if (slot.y < selectedInventorySlot.y) {
                 otherAbove++;
             } else {
                 otherBelow++;
