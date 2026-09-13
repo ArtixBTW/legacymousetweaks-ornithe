@@ -2,7 +2,9 @@ package com.infloat.legacymousetweaks.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import net.minecraft.client.MinecraftClient;
+
+import net.minecraft.client.Minecraft;
+import net.ornithemc.osl.lifecycle.api.client.MinecraftInstance;
 
 import java.io.File;
 import java.io.FileReader;
@@ -56,8 +58,8 @@ public final class ConfigManager {
     }
 
     private static File getConfigFile() {
-        MinecraftClient mc = MinecraftClient.getInstance();
-        File gameDir = mc != null ? mc.runDirectory : new File(".");
+        Minecraft mc = MinecraftInstance.get();
+        File gameDir = mc != null ? mc.gameDir : new File(".");
         return new File(new File(gameDir, "config"), "legacymousetweaks.json");
     }
 }

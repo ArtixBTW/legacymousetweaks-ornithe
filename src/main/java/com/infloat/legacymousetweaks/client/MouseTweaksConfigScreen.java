@@ -60,11 +60,11 @@ public class MouseTweaksConfigScreen extends Screen {
                 break;
             case 100:
                 ConfigManager.save();
-                this.client.setScreen(this.parent);
+                minecraft.openScreen(parent);
                 return;
             case 101:
                 ConfigManager.load();
-                this.client.setScreen(this.parent);
+                minecraft.openScreen(parent);
                 return;
             default:
                 return;
