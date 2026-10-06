@@ -5,7 +5,9 @@
   "name": "Legacy Mouse Tweaks",
   "description": "A port of YaLTeR's Mouse Tweaks to Ornithe 1.8.9",
   "authors": [
-    "infloat"
+    "Ivan Molodetskikh (YaLTeR) (Original)",
+    "infloat (Legacy Fabric Backport)",
+    "ArtixBTW (Ornithe Port)"
   ],
   "contact": {
     "homepage": "https://github.com/ArtixBTW/legacymousetweaks-ornithe",
