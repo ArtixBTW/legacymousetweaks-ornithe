@@ -29,6 +29,9 @@ dependencies {
 	ploceus.dependOsl(project.osl_version)
 
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modCompileOnly("com.terraformersmc:modmenu:${project.modmenu_version}") {
+		transitive = false
+	}
 }
 
 processResources {

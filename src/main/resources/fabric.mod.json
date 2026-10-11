@@ -20,8 +20,8 @@
     "main": [
       "com.infloat.legacymousetweaks.LegacyMouseTweaks"
     ],
-    "client": [
-      "com.infloat.legacymousetweaks.client.LegacyMouseTweaksClient"
+    "modmenu": [
+      "com.infloat.legacymousetweaks.client.LegacyMouseTweaksModMenuApi"
     ]
   },
   "mixins": [
